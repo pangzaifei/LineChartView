@@ -1,13 +1,17 @@
 package com.pzf.linechartview;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
+import java.util.Date;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
@@ -19,10 +23,16 @@ import android.graphics.Path;
 import android.graphics.Point;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.os.Handler;
+import android.os.Message;
 import android.util.AttributeSet;
+import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
-import android.widget.Toast;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
 /**
  * 动态折线图
@@ -30,13 +40,14 @@ import android.widget.Toast;
  * @author pangzf
  * 
  */
-@SuppressLint("ViewConstructor")
-class LineChartView extends View {
+@SuppressLint("NewApi")
+class LineChartView extends LinearLayout {
     Context mContext;
     /**
      * 折线图峰值的小红方块
      */
     public static final int RECT_SIZE = 10;
+    protected static final int END_TIME = 0;
     /**
      * 选择的点
      */
@@ -56,7 +67,7 @@ class LineChartView extends View {
     /**
      * 数据点集合，存放点的x,y坐标
      */
-    HashMap<Double, Double> mDataMap;
+    ConcurrentSkipListMap<Double, Double> mDataMap;
     /**
      * 网格
      */
@@ -64,11 +75,16 @@ class LineChartView extends View {
     /**
      * x轴，时间点对应的文字
      */
-    String[] mStrTimes;
+    // String[] mStrTimes;
     /**
      * 是否显示网格
      */
     Boolean isylineshow;
+
+    private int mMaxValueIndex;// 最大值
+    private TextView mTvHeightValue;// textview
+    private ImageView mIvPoint;// imageview
+    private String[] mStrTimes;
 
     int mBheight = 0;// 高度，距离x轴的距离
     int mMarginb = 40;// 距离x轴的间距
@@ -81,25 +97,62 @@ class LineChartView extends View {
     int mBackGroundColor = 0;// 背景颜色
     int mBackGroundResourceId = 0;// 设置背景资源
 
-    int mWidthMarginLef = 50;// 距离左边的距离
-    int mGridLineColor = Color.GRAY;// 这是网格线的颜色
+    int mWidthMarginLef = 33;// x线距离左边的距离
+    int mWidthMarginRight = 15;// x线距离右边的距离
+    int mScaleYTextToLine = 25;// y轴文字到线的距离
+    int mGridLineColor = R.color.xytextcolor;// 这是网格线的颜色
     int mGridLineSize = 1;// 网格线的粗细
 
-    int mLineColor = Color.BLUE;// 设置折线的颜色
-    int mLineSize = 0;// 折纸折线的大小
+    int mLineColor = getResources().getColor(R.color.line_blue_color);// 设置折线的颜色
+    int mLineSize = 2;// 折纸折线的大小
 
-    int mTimeTextColor = Color.RED;// x轴时间颜色值
-    int mTimeTextSize = 10;// x轴文字的大小
+    int mTimeTextColor = R.color.xytextcolor;// x轴时间颜色值
+    int mTimeTextSize = 12;// x轴文字的大小
 
-    int mYTextSize = 20;// y轴文字大小
-    int mYTextColor = Color.BLACK;// y轴文字的颜色
+    int mYTextSize = 12;// y轴文字大小
+    int mYTextColor = R.color.line_grid_line;// y轴文字的颜色
 
     int mMaxIndex = 0;
+    /**
+     * x轴文字距离x轴的距离
+     */
+    int mXTextMarginX = 20;
+    /**
+     * x轴文字最后一个距离右边的距离
+     */
+    int mXTextMarginRight = 60;
+
+    long mStartTime;// 开始的时间
+    long mEndTime;// 停止的时间
+    int mDelayCount;// 延迟数
+    int mValueTextSize = 6;// 大小sp
+
+    Drawable mTvBackground;// TextView背景图
 
     // 枚举实现坐标桌面的样式风格
     public static enum Mstyle {
         Line, Curve
     }
+
+    private Handler mHandler = new Handler() {
+
+        @Override
+        public void handleMessage(Message msg) {
+            super.handleMessage(msg);
+            switch (msg.what) {
+                case END_TIME:
+                    updateTimes();
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+    };
+    private SimpleDateFormat mForMat;
+    private ArrayList<Double> mDataMapValueList;
+    private ScheduledExecutorService mSheduled;
 
     /**
      * @param map
@@ -116,16 +169,60 @@ class LineChartView extends View {
      *            是否显示纵向网格
      * @return
      */
-    public void SetInitView(HashMap<Double, Double> map, int totalvalue,
-            int pjvalue, String xstr, String ystr, Boolean isylineshow) {
+    public void SetInitView(ConcurrentSkipListMap<Double, Double> map,
+            int totalvalue, int pjvalue, String xstr, String ystr,
+            Boolean isylineshow, Drawable drawable) {
         this.mDataMap = map;
         this.mTotalValue = totalvalue;
         this.mYScale = pjvalue;
         this.mXstr = xstr;
         this.mYstr = ystr;
         this.isylineshow = isylineshow;
+        this.mTvBackground = drawable;
+        initAddView();// 添加view
         // 屏幕横向
         // act.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+    }
+
+    /**
+     * 添加的view
+     */
+    private void initAddView() {
+        mForMat = new SimpleDateFormat("HH:mm:ss ");
+        mTvHeightValue = new TextView(mContext);
+        mTvHeightValue.setBackgroundDrawable(mTvBackground);
+        mTvHeightValue.setTextSize(dip2px(mContext, mValueTextSize));
+        mTvHeightValue.setTextColor(Color.WHITE);
+        mTvHeightValue.setGravity(Gravity.CENTER_HORIZONTAL);
+        mTvHeightValue.setVisibility(View.GONE);
+
+        mIvPoint = new ImageView(mContext);
+        mIvPoint.setBackgroundDrawable(getResources().getDrawable(
+                R.drawable.chartview_point));
+        mIvPoint.setVisibility(View.GONE);
+        this.addView(mIvPoint);
+        this.addView(mTvHeightValue);
+    }
+
+    /**
+     * 更新时间
+     */
+    protected void updateTimes() {
+        mStrTimes = new String[2];
+        mStrTimes[0] = getTimes(mStartTime);
+        mStrTimes[1] = getTimes(mEndTime);
+
+    }
+
+    /**
+     * 获取当前时间
+     * 
+     * @param startTime
+     * @return
+     */
+    private String getTimes(long time) {
+        Date curDate = new Date(time);// 获取当前时间
+        return mForMat.format(curDate);
     }
 
     @SuppressLint("DrawAllocation")
@@ -144,6 +241,7 @@ class LineChartView extends View {
 
         int width = getWidth();
         int marinLeftSize = dip2px(mContext, mWidthMarginLef);
+        int marginRightSize = dip2px(mContext, mWidthMarginRight);
         int ySpaceSize = mTotalValue / mYScale;// 界面布局的尺寸的比例
 
         // set up paint
@@ -164,8 +262,9 @@ class LineChartView extends View {
             // }
             // 画x轴直线
             canvas.drawLine(marinLeftSize, mBheight - (mBheight / ySpaceSize)
-                    * i + mMargin, width, mBheight - (mBheight / ySpaceSize)
-                    * i + mMargin, paint);// Y坐标
+                    * i + mMargin, width - marginRightSize, mBheight
+                    - (mBheight / ySpaceSize) * i + mMargin, paint);
+            // Y坐标
             drawline(mYScale * i + mYstr, marinLeftSize / 2, mBheight
                     - (mBheight / ySpaceSize) * i + mMargin, canvas);
 
@@ -185,19 +284,15 @@ class LineChartView extends View {
                                 + (width - marinLeftSize) / mGrid.size() * i,
                         mBheight + mMargin, paint);
             }
-            // drawLineAndCircle(dlk.get(i)+xstr,
-            // blwidh+(width-blwidh)/dlk.size()*i, bheight+40,
-            // canvas,blwidh+(width-blwidh)/dlk.size()*i,bheight+20,5,getResources().getColor(R.color.orange));//X坐标
 
         }
 
         // 点的操作设置
         mPoints = getpoints(mGrid, mDataMap, xlist, mTotalValue, mBheight);
-        // Point[] ps=getpoints(dlk, map, xlist, totalvalue, bheight);
-        // mPoints=ps;
+        mMaxValueIndex = getMaxPoint(mPoints, canvas);
 
         paint.setColor(mLineColor); // 设置折线的颜色
-        paint.setStyle(Style.STROKE);
+        paint.setStyle(Style.FILL);
         paint.setStrokeWidth(mLineSize);
 
         if (mStyle == Mstyle.Curve)
@@ -205,51 +300,22 @@ class LineChartView extends View {
         else
             drawline(mPoints, canvas, paint);
 
-        // ArrayList<Double> values = (ArrayList<Double>) map.values();
-        Collection<Double> values = mDataMap.values();
-        Double[] array = values.toArray(new Double[0]);
-
-        // for (int i=0; i<mPoints.length; i++)
-        // {
-        // // canvas.drawRect(pointToRect(mPoints[i]),paint); //画小方块
-        // // canvas.drawRect(pointToRect(mPoints[i]),paint); //画圆点
-        //
-        // // canvas.drawCircle(mPoints[i].x, mPoints[i].y, 5, paint);//画折线图上的圆点
-        // // canvas.drawText(array[i]+"", mPoints[i].x+5, mPoints[i].y,
-        // paint);//写字
-        //
-        // }
         // 写时间值
-        int tempscale = (this.getWidth() - marinLeftSize) / mStrTimes.length;
-        int scale = (tempscale + tempscale / mStrTimes.length) - 4;
+        int tempscale = (this.getWidth() - marinLeftSize) / 2;
+        int scale = (tempscale + tempscale / 2) - 4;
         paint.setColor(mTimeTextColor);
         paint.setStyle(Style.FILL);
-        paint.setTextSize(mTimeTextSize);
-        if (mStrTimes.length > 0) {
-            for (int i = 0; i < mStrTimes.length; i++) {
-                String times = covertTimes(Float.parseFloat(mStrTimes[i]));
-                // 画x轴时间文字
-                canvas.drawText(times, marinLeftSize + scale * i,
-                        mBheight + 40, paint);
-                // canvas.drawLine(blwidh+(width-blwidh)/dlk.size()*i,margint,blwidh+(width-blwidh)/dlk.size()*i,bheight+margint,
-                // paint);
-            }
-        }
-        // if(strTimes.length>0){
-        // for(int i=0;i<strTimes.length;i++){
-        // String times=covertTimes(Integer.parseInt(strTimes[i]));
-        //
-        // canvas.drawText(times, blwidh+scale*i,bheight+40, paint);
-        // //
-        // canvas.drawLine(blwidh+(width-blwidh)/dlk.size()*i,margint,blwidh+(width-blwidh)/dlk.size()*i,bheight+margint,
-        // paint);
-        // }
-        // }
-        if (mTimeDelay > 0) {
-            setStrTimes(mStrTimes, mTimeDelay);
-        } else {
-            Toast.makeText(mContext.getApplicationContext(), "延迟时间不能小于0", 0)
-                    .show();
+        paint.setTextSize(dip2px(mContext, mTimeTextSize));
+        if (mStrTimes != null && mStrTimes.length > 0) {
+
+            canvas.drawText(mStrTimes[0], scale * 0 + marinLeftSize, mBheight
+                    + dip2px(mContext, mXTextMarginX), paint);
+            // 最右边
+            int cWidth = canvas.getWidth();
+            canvas.drawText(mStrTimes[1],
+                    cWidth - dip2px(mContext, mXTextMarginRight), mBheight
+                            + dip2px(mContext, 20), paint);
+
         }
 
         int maxIndex = getMapHalve();
@@ -259,63 +325,38 @@ class LineChartView extends View {
 
     }
 
-    public void setStrTimes(String[] str, long delay) {
-        this.mTimeDelay = delay;
-        mStrTimes = getStrTimes();
-        String[] tempTimes = new String[str.length];
-        for (int i = 0; i < str.length; i++) {
-            if (i != 0) {
-                tempTimes[i] = String.valueOf(Float.parseFloat(str[i]) + delay
-                        / 1000);
-            } else {
-                tempTimes[0] = "0";
-            }
-            // Log.e("fff", "数组:i"+i+":"+tempTimes[i]);
-
-        }
-        str = tempTimes;
-        String[] times = new String[str.length];
-        times = str;
-        if (null != times && times.length > 0) {
-            // 处理
-            String max = times[times.length - 1];
-            float iMax = Float.parseFloat(max);
-            float scale = iMax / (str.length - 1);
-            if (scale > 0) {
-                for (int i = 0; i < str.length; i++) {
-                    // if(i==str.length-1||i==0){
-                    // times[i]=String.valueOf(i*(scale));
-                    // }else{
-                    // times[i]=String.valueOf(i*((int)scale));
-                    // }
-                    times[i] = String.valueOf(i * (scale));
-                }
-                this.mStrTimes = times;
-            } else {
-                this.mStrTimes = str;
+    private int getMaxPoint(Point[] point, Canvas canvas) {
+        int min = 0;
+        int index = 0;
+        int max = canvas.getHeight();
+        for (int i = 0; i < point.length - 1; i++) {
+            if (canvas.getHeight() - point[i].y > canvas.getHeight() - max) {
+                max = point[i].y;
+                index = i;
             }
 
-        } else {
-            this.mStrTimes = str;
         }
-
-        // this.strTimes=str;
+        return index;
     }
 
-    /**
-     * 秒转换成时分秒
-     * 
-     * @param s
-     * @return
-     */
-    private String covertTimes(float s) {
-        int temp = (int) s;
-        int N = temp / 3600;
-        temp = temp % 3600;
-        int K = temp / 60;
-        temp = temp % 60;
-        int M = temp;
-        return N + ":" + K + ":" + M;
+    public void setStartTime(long startTime, final long delay) {
+        this.mStartTime = startTime;
+        mSheduled = Executors.newScheduledThreadPool(1);
+        mSheduled.scheduleAtFixedRate(new Runnable() {
+
+            @Override
+            public void run() {
+                mDelayCount++;
+                mEndTime = mStartTime + delay * mDelayCount;
+                mHandler.sendMessage(mHandler.obtainMessage(END_TIME));
+            }
+        }, delay / 1000, delay / 1000, TimeUnit.SECONDS);
+    }
+
+    public void stopTime() {
+        if (mSheduled != null && !mSheduled.isShutdown()) {
+            mSheduled.shutdown();
+        }
     }
 
     @Override
@@ -405,14 +446,47 @@ class LineChartView extends View {
      * @param canvas
      * @param paint
      */
+    @SuppressLint("NewApi")
     private void drawline(Point[] ps, Canvas canvas, Paint paint) {
         Point startp = new Point();
         Point endp = new Point();
         for (int i = 0; i < ps.length - 1; i++) {
             startp = ps[i];
             endp = ps[i + 1];
-            canvas.drawLine(startp.x, startp.y, endp.x, endp.y, paint);
+
+            // 画圆点
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(mLineColor);
+            paint.setStrokeWidth(dip2px(mContext, mLineSize));
+            if (mMaxValueIndex != 0 && i == mMaxValueIndex) {
+
+                Object value = mDataMap.values().toArray()[i];
+
+                if (endp.y > startp.y) {
+                    canvas.drawLine(startp.x, startp.y, endp.x, endp.y, paint);
+                    // canvas.drawCircle(startp.x, startp.y, radius, paint);
+                    // 提示pop
+                    mTvHeightValue.setVisibility(View.VISIBLE);
+                    mTvHeightValue.setText(value + mXstr);
+                    mTvHeightValue.setX(startp.x - mTvHeightValue.getWidth()
+                            / 2);
+                    mTvHeightValue.setY(startp.y - mTvHeightValue.getHeight()
+                            - dip2px(mContext, 5));
+
+                    // 提示圆点
+                    mIvPoint.setVisibility(View.VISIBLE);
+                    mIvPoint.setX(startp.x - mIvPoint.getWidth() / 2);
+                    mIvPoint.setY(startp.y - mIvPoint.getHeight() / 2);
+                } else {
+                    canvas.drawLine(startp.x, startp.y, endp.x, endp.y, paint);
+                }
+
+            } else {
+                canvas.drawLine(startp.x, startp.y, endp.x, endp.y, paint);
+            }
+
         }
+
     }
 
     /**
@@ -426,8 +500,8 @@ class LineChartView extends View {
      * @return
      */
     private Point[] getpoints(ArrayList<Double> dlk,
-            HashMap<Double, Double> map, ArrayList<Integer> xlist, int max,
-            int h) {
+            ConcurrentSkipListMap<Double, Double> map,
+            ArrayList<Integer> xlist, int max, int h) {
         Point[] points = new Point[dlk.size()];
         for (int i = 0; i < dlk.size(); i++) {
             int ph = h - (int) (h * (map.get(dlk.get(i)) / max));
@@ -457,7 +531,7 @@ class LineChartView extends View {
      */
     private void drawline(String text, int x, int y, Canvas canvas) {
         Paint p = new Paint();
-        p.setTextSize(mYTextSize);
+        p.setTextSize(dip2px(mContext, mYTextSize));
         p.setColor(mYTextColor);
         canvas.drawText(text, x, y, p);
     }
@@ -516,11 +590,15 @@ class LineChartView extends View {
      * @return
      */
     @SuppressWarnings("rawtypes")
-    public ArrayList<Double> getInitFromMap(HashMap<Double, Double> map) {
+    public ArrayList<Double> getInitFromMap(
+            ConcurrentSkipListMap<Double, Double> map) {
         ArrayList<Double> dlk = new ArrayList<Double>();
+        mDataMapValueList = new ArrayList<Double>();
         int position = 0;
-        if (map == null)
+        if (map == null) {
             return null;
+        }
+
         Set set = map.entrySet();
         Iterator iterator = set.iterator();
 
@@ -528,7 +606,10 @@ class LineChartView extends View {
             @SuppressWarnings("rawtypes")
             Map.Entry mapentry = (Map.Entry) iterator.next();
             dlk.add((Double) mapentry.getKey());
+            mDataMapValueList.add((Double) mapentry.getValue());
+
         }
+
         for (int i = 0; i < dlk.size(); i++) {
             int j = i + 1;
             position = i;
@@ -593,12 +674,14 @@ class LineChartView extends View {
                 mDataMap.clear();
                 mDataMap.putAll(mLinkedHashMap);
             }
+            mTvHeightValue.setVisibility(View.GONE);
+            mIvPoint.setVisibility(View.GONE);
 
         }
 
     }
 
-    public HashMap<Double, Double> getMap() {
+    public ConcurrentSkipListMap<Double, Double> getMap() {
         return mDataMap;
     }
 
@@ -607,7 +690,7 @@ class LineChartView extends View {
      * 
      * @param map
      */
-    public void setMap(HashMap<Double, Double> map) {
+    public void setMap(ConcurrentSkipListMap<Double, Double> map) {
         this.mDataMap = map;
     }
 
@@ -798,10 +881,6 @@ class LineChartView extends View {
         this.mYTextColor = mYTextColor;
     }
 
-    public String[] getStrTimes() {
-        return this.mStrTimes;
-    }
-
     public LineChartView(Context ct) {
         super(ct);
         this.mContext = ct;
@@ -812,8 +891,15 @@ class LineChartView extends View {
         this.mContext = ct;
     }
 
-    public LineChartView(Context ct, AttributeSet attrs, int defStyle) {
-        super(ct, attrs, defStyle);
-        this.mContext = ct;
+    /**
+     * 返回最后的时间
+     * 
+     * @return
+     */
+    public String getEndTime() {
+        if (mStrTimes != null && mStrTimes.length > 0) {
+            return mStrTimes[1];
+        }
+        return "";
     }
 }

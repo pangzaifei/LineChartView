@@ -9,9 +9,7 @@
         android:id="@+id/charview"
         android:layout_width="match_parent"
         android:layout_height="300dip"
-        android:background="@color/white" 
-        />
-
+        android:background="@color/white" />
 
     <Button
         android:id="@+id/bt_add"
@@ -20,5 +18,24 @@
         android:layout_below="@+id/charview"
         android:layout_marginTop="48dp"
         android:text="动态加载" />
+
+    <Button
+        android:id="@+id/btn_endtime"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/charview"
+        android:layout_marginTop="48dp"
+        android:layout_toRightOf="@id/bt_add"
+        android:text="获取结束time" />
+
+    <Button
+        android:id="@+id/btn_cut_window"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/charview"
+        android:layout_toRightOf="@id/btn_endtime"
+        android:text="截屏" 
+        android:layout_marginTop="48dp"
+        />
 
 </RelativeLayout>

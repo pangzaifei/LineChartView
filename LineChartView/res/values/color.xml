@@ -3,6 +3,9 @@
 
     <color name="white">#FFFFFFFF</color>
     <color name="orange">#ff3300</color>
-     <color name="yellow">#77ffff00</color>
+    <color name="yellow">#77ffff00</color>
+    <color name="line_grid_line">#333333</color>
+    <color name="xytextcolor">#333333</color>
+    <color name="line_blue_color">#7FBDED</color>
 
 </resources>
